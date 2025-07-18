@@ -159,7 +159,7 @@ set(USE_MICRO_STANDALONE_RUNTIME OFF)
 # - OFF: disable llvm, note this will disable CPU codegen
 #        which is needed for most cases
 # - /path/to/llvm-config: enable specific LLVM when multiple llvm-dev is available.
-set(USE_LLVM ON)
+set(USE_LLVM OFF)
 
 # Whether use MLIR to help analyze, requires USE_LLVM is enabled
 # Possible values: ON/OFF
@@ -208,7 +208,7 @@ set(USE_AMX OFF)
 
 # Whether use OpenMP thread pool, choices: gnu, intel
 # Note: "gnu" uses gomp library, "intel" uses iomp5 library
-set(USE_OPENMP llvm)
+set(USE_OPENMP none)
 
 # Whether use contrib.random in runtime
 set(USE_RANDOM ON)
