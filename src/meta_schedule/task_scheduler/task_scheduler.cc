@@ -34,7 +34,9 @@ TaskRecord::TaskRecord(TuneContext ctx, double task_weight) {
       << "ValueError: Require `context.search_strategy`, but it is not defined";
   TVM_PY_LOG(INFO, ctx->logger) << "\n" << ctx->mod;
   ctx->Initialize();
-  n->flop = std::max(1.0, tir::EstimateTIRFlops(ctx->mod.value()));
+  // [ywshin]: need to implement flops for sparse matrix
+  n->flop = 100000000.0;
+  // n->flop = std::max(1.0, tir::EstimateTIRFlops(ctx->mod.value()));
   this->data_ = std::move(n);
 }
 
@@ -55,6 +57,7 @@ void SendToRunner(TaskRecordNode* self, const Runner& runner) {
   Array<MeasureCandidate> candidates = self->measure_candidates.value();
   Array<BuilderResult> builder_results = self->builder_results.value();
   Target target = self->ctx->target.value();
+  Optional<Array<runtime::NDArray>> arg = self->ctx->task_input;
   ICHECK_EQ(candidates.size(), builder_results.size());
   int n = candidates.size();
   int n_build_errors = 0;
@@ -69,7 +72,8 @@ void SendToRunner(TaskRecordNode* self, const Runner& runner) {
     }
     inputs.push_back(RunnerInput(/*artifact_path=*/builder_result->artifact_path.value(),
                                  /*device_type=*/target->kind->name,
-                                 /*args_info=*/candidate->args_info));
+                                 /*args_info=*/candidate->args_info,
+                                 /*arg=*/arg));
   }
   Array<RunnerFuture> futures = runner->Run(inputs);
   if (n_build_errors == 0) {

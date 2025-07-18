@@ -124,6 +124,7 @@ def _worker_func(
     artifact_path: str,
     device_type: str,
     args_info: T_ARG_INFO_JSON_OBJ_LIST,
+    arg: T_ARGUMENT_LIST,
 ) -> List[float]:
     f_alloc_argument: T_ALLOC_ARGUMENT = get_global_func_with_default_on_worker(
         _f_alloc_argument, default_alloc_argument
@@ -149,11 +150,14 @@ def _worker_func(
         # Step 2: Allocate input arguments
         with Profiler.timeit("LocalRunner/alloc_argument"):
             device = tvm.runtime.device(dev_type=device_type, dev_id=0)
-            repeated_args: List[T_ARGUMENT_LIST] = f_alloc_argument(
-                device,
-                args_info,
-                alloc_repeat,
-            )
+            if len(arg) == 0:
+                repeated_args: List[T_ARGUMENT_LIST] = f_alloc_argument(
+                    device,
+                    args_info,
+                    alloc_repeat,
+                )
+            else:
+                repeated_args = [arg] * alloc_repeat
         # Step 3: Run time_evaluator
         with Profiler.timeit("LocalRunner/run_evaluator"):
             costs: List[float] = f_run_evaluator(
@@ -300,6 +304,7 @@ class LocalRunner(PyRunner):
                 str(runner_input.artifact_path),
                 str(runner_input.device_type),
                 tuple(arg_info.as_json() for arg_info in runner_input.args_info),
+                [e.asnumpy() for e in runner_input.arg] if runner_input.arg is not None else list(),
             )
             try:
                 result: List[float] = future.result()

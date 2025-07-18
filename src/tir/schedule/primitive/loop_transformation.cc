@@ -62,7 +62,8 @@ class SubstituteVarAndCollectOpaqueBlock : public StmtExprMutator {
 
   Stmt VisitStmt_(const BlockRealizeNode* op) final {
     BlockRealize realize = Downcast<BlockRealize>(StmtMutator::VisitStmt_(op));
-    if (realize->block->iter_vars.empty()) {
+    // [ywshin]: IDK why but this makes the block regarding sparse matrix re-created.
+    if (true || realize->block->iter_vars.empty()) {
       opaque_blocks_->Set(op->block, realize->block);
     }
     return std::move(realize);

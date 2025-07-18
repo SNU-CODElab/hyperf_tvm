@@ -21,6 +21,47 @@ from tvm.relay import data_dep_optimization as ddo
 from tvm.auto_scheduler import _ffi_api
 
 
+def random_csr_matrix(m, n, density, dtype):
+    """Generate a random sparse matrix in CSR format.
+
+    Parameters
+    ----------
+    m : int
+        Number of rows in the matrix.
+    n : int
+        Number of columns in the matrix.
+    density : float
+        The density of the non-zero elements (between 0 and 1).
+    dtype : data-type
+        The desired data-type for the matrix.
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        Randomly generated sparse matrix in CSR format.
+    """
+    import numpy as np
+    import scipy.sparse as sp
+
+    # 총 원소 수 계산
+    total_elements = m * n
+    # 비제로 원소 수 계산
+    nnz = int(density * total_elements)
+
+    # 무작위로 행과 열 인덱스 선택 (중복 방지)
+    indices = np.random.choice(total_elements, size=nnz, replace=False)
+    row_indices = indices // n
+    col_indices = indices % n
+
+    # 무작위 데이터 생성
+    data = np.random.randn(nnz).astype(dtype)
+
+    # 희소 행렬 생성
+    s = sp.csr_matrix((data, (row_indices, col_indices)), shape=(m, n), dtype=dtype)
+
+    return s
+
+
 def random_bsr_matrix(m, n, bs_r, bs_c, density, dtype):
     """Generate a random sparse matrix in bsr format.
 
@@ -44,7 +85,7 @@ def random_bsr_matrix(m, n, bs_r, bs_c, density, dtype):
         np.random.choice(candidate_blocks.shape[0], size=num_blocks, replace=False)
     ]
     # pylint: disable=invalid-name
-    for (r, c) in chosen_blocks:
+    for r, c in chosen_blocks:
         y[r : r + bs_r, c : c + bs_c] = np.random.randn(bs_r, bs_c)
     s = sp.bsr_matrix(y, blocksize=(bs_r, bs_c))
     assert s.data.shape == (num_blocks, bs_r, bs_c)

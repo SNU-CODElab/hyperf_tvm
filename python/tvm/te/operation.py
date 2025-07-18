@@ -28,6 +28,7 @@ import tvm.tir._ffi_api
 from tvm._ffi.base import string_types
 from tvm.ir import Array
 from tvm.runtime import convert
+import tvm
 
 from . import _ffi_api
 from . import tag as _tag
@@ -620,4 +621,6 @@ def create_prim_func(
     """
     if not isinstance(ops, (list, tuple, Array)):
         ops = [ops]
-    return _ffi_api.CreatePrimFunc(ops, index_dtype_override)
+    func = _ffi_api.CreatePrimFunc(ops, index_dtype_override)
+    # [ywshin]: 내부 자료구조가 깨져있어서, round-trip으로 복구
+    return tvm.script.from_source(func.script())

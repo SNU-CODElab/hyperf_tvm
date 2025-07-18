@@ -411,6 +411,12 @@ std::pair<Var, BlockVarDomainInfo> SolveBlockVarDomain(const arith::IntSet& prov
   Optional<Var> var;
   arith::PVar<Var> p_v;
   arith::PVar<PrimExpr> p_e;
+  // [ywshin]: binning을 대응하기 위한 코드
+  if (provided_min.as<BufferLoad>().defined()) {
+    BufferLoad e = provided_min.as<BufferLoad>().value();
+    provided_min = e->indices[0];
+    provided_max = e->indices[0];
+  }
   if ((p_v * p_e).Match(provided_min) || (p_e * p_v).Match(provided_min)) {
     PrimExpr e = p_e.Eval();
     var = p_v.Eval();
@@ -689,15 +695,17 @@ void ComputeAtOrReverseComputeAtImpl(ScheduleState self, const StmtSRef& block_s
   const ForNode* loop = TVM_SREF_TO_FOR(loop_sref);
   // Step 1. Bunch of checks
   // Check condition 1) : scope stage pipeline
+  // [ywshin]: multi-level tiling을 위해 일반적으로 require_stage_pipeline을 임시로 false로 둔다.
   StmtSRef scope_root_sref = GetScopeRoot(self, block_sref,
-                                          /*require_stage_pipeline=*/true);
+                                          /*require_stage_pipeline=*/false);
   Block scope_root = GetRef<Block>(scope_root_sref->StmtAs<BlockNode>());
   AddShapeVarBounds(self, scope_root_sref.get(), analyzer);
   BlockScope scope = self->GetBlockScope(scope_root_sref);
   Array<StmtSRef> producer_srefs = GetProducers(block_sref, scope);
   Array<StmtSRef> consumer_srefs = GetConsumers(block_sref, scope);
   // Check condition 2) : `block` is a complete or reduction block
-  CheckCompleteOrReductionBlock(self, block_sref, scope_root_sref);
+  // [ywshin]: 너무 강한 제약조건. 완화한다.
+  // CheckCompleteOrReductionBlock(self, block_sref, scope_root_sref);
   // Check condition 3): `block` and `loop` are under the same scope,
   // and `loop` is not the ancestor of `block`
   NotInSameScopeError::CheckAndBindLoopDomain(self, block_sref, loop_sref, scope_root_sref,

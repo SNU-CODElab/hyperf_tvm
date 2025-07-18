@@ -180,6 +180,26 @@ class LayoutFreePlaceholdersNormalizer : public StmtMutator {
                                    "workload"};
 };
 
+namespace {
+// [ywshin]: is it safe?
+class VarReplacerByName : public StmtExprMutator {
+ public:
+  explicit VarReplacerByName(const std::unordered_map<String, PrimExpr>& vmap) : vmap_(vmap) {}
+
+  PrimExpr VisitExpr_(const VarNode* op) final {
+    auto it = vmap_.find(op->name_hint);
+    if (it != vmap_.end()) {
+      return it->second;
+    } else {
+      return GetRef<PrimExpr>(op);
+    }
+  }
+
+ private:
+  const std::unordered_map<String, PrimExpr>& vmap_;
+};
+}  // namespace
+
 BlockRealize GenerateBlockFromTensors(const te::ComputeOp& compute_op,
                                       const Array<te::Tensor>& tensors, Array<PrimExpr> bindings,
                                       PrimExpr expr_body, CreateFuncInfo* info,
@@ -388,12 +408,31 @@ Stmt GenerateStmtFromCompute(const te::ComputeOp& compute_op, CreateFuncInfo* in
   Stmt body = SeqStmt::Flatten(seq_stmt);
 
   // Step 3. Generate loop nesting.
+  std::unordered_map<String, PrimExpr> subst_map;
+  for (size_t i = axes.size(); i > 0; --i) {
+    const Var& loop_var = Downcast<Var>(bindings[i - 1]);
+    subst_map[loop_var.get()->name_hint] = loop_var;
+  }
+  VarReplacerByName replacer(subst_map);
+  Array<Var> loop_vars;
+  Array<PrimExpr> dom_mins;
+  Array<PrimExpr> dom_extents;
   for (size_t i = axes.size(); i > 0; --i) {
     const IterVar& axis = axes[i - 1];
     PrimExpr dom_min = analyzer->Simplify(axis->dom->min);
     PrimExpr dom_extent = analyzer->Simplify(axis->dom->extent);
+
     const Var& loop_var = Downcast<Var>(bindings[i - 1]);
-    body = For(loop_var, dom_min, dom_extent, ForKind::kSerial, body);
+    dom_min = replacer(dom_min);
+    dom_min = info->transformer(dom_min);
+    dom_extent = replacer(dom_extent);
+    // [ywshin]: to prevent "TVMError: Do not have a default for tir.ProducerLoad"
+    dom_extent = info->transformer(dom_extent);
+    body = replacer(body);
+    body = For(loop_var, dom_min, dom_extent, ForKind::kSerial, body, NullOpt);
+    loop_vars.push_back(loop_var);
+    dom_mins.push_back(dom_min);
+    dom_extents.push_back(dom_extent);
   }
 
   return body;

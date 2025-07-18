@@ -15,12 +15,13 @@
 # specific language governing permissions and limitations
 # under the License.
 """MetaSchedule-TIR integration"""
-from typing import List, Mapping, Optional, Tuple, Union
+from typing import List, Mapping, Optional, Tuple, Union, Dict
 
 # isort: off
 from typing_extensions import Literal
 
 # isort: on
+import tvm
 from tvm import ir, tir
 from tvm._ffi import register_func
 from tvm.target import Target
@@ -60,6 +61,7 @@ def tune_tir(  # pylint: disable=too-many-locals
     seed: Optional[int] = None,
     module_equality: str = "structural",
     special_space: Optional[Mapping[str, SpaceGenerator.SpaceGeneratorType]] = None,
+    task_inputs: Optional[Union[Dict[str, List[tvm.nd.NDArray]], List[tvm.nd.NDArray]]] = None,
 ) -> Database:
     """Tune a TIR function or an IRModule of TIR functions.
 
@@ -130,6 +132,12 @@ def tune_tir(  # pylint: disable=too-many-locals
             task_space = space
         if task_space is None:
             continue
+
+        if not isinstance(task_inputs, dict):
+            task_input = task_inputs
+        else:
+            task_input = task_inputs[task_name]
+
         tasks.append(
             TuneContext(
                 mod=task_func,
@@ -140,6 +148,7 @@ def tune_tir(  # pylint: disable=too-many-locals
                 rand_state=rand_state,
                 num_threads=num_tuning_cores,
                 logger=logger,
+                task_input=task_input,
             ).clone()
         )
     return tune_tasks(
@@ -263,7 +272,8 @@ def compile_tir(
     sch : tir.Schedule
         The best schedule found in the database.
     """
-    mod = _normalize_mod(mod)
+    if isinstance(mod, tir.PrimFunc):
+        mod = _normalize_mod(mod)
     if not isinstance(target, Target):
         target = Target(target)
     return database.query_schedule(mod, target, workload_name="main")

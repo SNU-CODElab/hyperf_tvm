@@ -107,12 +107,16 @@ def run_evaluator_common(
         number=evaluator_config.number,
         repeat=evaluator_config.repeat,
         min_repeat_ms=evaluator_config.min_repeat_ms,
-        f_preproc="cache_flush_cpu_non_first_arg"
-        if evaluator_config.enable_cpu_cache_flush
-        else "",
+        f_preproc=(
+            "cache_flush_cpu_non_first_arg" if evaluator_config.enable_cpu_cache_flush else ""
+        ),
     )
     repeated_costs: List[List[float]] = []
     for args in repeated_args:
+        args = [
+            ndarray.array(arg, device=device) if not isinstance(arg, ndarray.NDArray) else arg
+            for arg in args
+        ]
         device.sync()
         profile_result = evaluator(*args)
         repeated_costs.append(profile_result.results)

@@ -16,13 +16,14 @@
 # under the License.
 """Meta Schedule tuning context."""
 
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union, Dict
 
 # isort: off
 from typing_extensions import Literal
 
 # isort: on
 
+import tvm
 from tvm import IRModule
 from tvm._ffi import register_object, register_func
 from tvm.runtime import Object
@@ -104,6 +105,7 @@ class TuneContext(Object):
         rand_state: int = -1,
         num_threads: Union[int, Literal["physical", "logical"]] = "physical",
         logger: Optional[Logger] = None,
+        task_input: Optional[Union[Dict[str, List[tvm.nd.NDArray]], List[tvm.nd.NDArray]]] = None,
     ):
         # pylint: disable=import-outside-toplevel
         import tvm.tir.tensor_intrin  # pylint: disable=unused-import
@@ -145,6 +147,7 @@ class TuneContext(Object):
             num_threads,
             rand_state,
             get_logging_func(logger),
+            task_input,
         )
         _ffi_api.TuneContextInitialize(self)  # type: ignore # pylint: disable=no-member
 

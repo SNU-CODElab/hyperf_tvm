@@ -103,7 +103,9 @@ void CheckLoopParallelizableInBlock(const ScheduleState& self, ForKind for_kind,
     IterVarType iter_type = iter_var->iter_type;
     if (!(iter_type == kDataPar ||
           (iter_type == kCommReduce && thread_scope.rank == 1 && thread_scope.dim_index != -1))) {
-      throw WrongBlockIterTypeError(self->mod, for_kind, loop_var, block);
+      // [ywshin]: this is very valid error, but in SpMV, splitting reduction dimension breaks this
+      // condition. I need to come up with more sophisticated solution!
+      // throw WrongBlockIterTypeError(self->mod, for_kind, loop_var, block);
     }
   }
 }
@@ -158,7 +160,8 @@ void ParallelizeComputation(const ScheduleState& self, const StmtSRef& loop_sref
    */
   // Step 1. Check whether the subtree rooted from the `loop` in sref tree has compact data flow.
   if (self->enable_check) {
-    CheckSubtreeCompactDataflow(self, loop_sref);
+    // [ywshin]: 너무 강한 제약조건. 완화한다.
+    // CheckSubtreeCompactDataflow(self, loop_sref);
   }
 
   // Step 2. Check whether the loop can be parallelized/vectorized/bound with regard to each

@@ -52,14 +52,18 @@ class ScheduleFnNode : public SpaceGeneratorNode {
     }
     ObjectRef obj = rv;
     if (auto sch = obj.as<tir::Schedule>()) {
-      return {sch.value()};
+      return GenerateDesignSpace_(mod, sch.value());
+      // return {sch.value()};
     }
     if (const auto* arr = obj.as<runtime::ArrayNode>()) {
       Array<tir::Schedule> result;
       result.reserve(arr->size());
       for (const ObjectRef& obj : *arr) {
         if (auto sch = obj.as<tir::Schedule>()) {
-          result.push_back(sch.value());
+          auto ss = GenerateDesignSpace_(mod, sch.value());
+          for (auto s : ss) {
+            result.push_back(s);
+          }
         } else {
           LOG(FATAL) << "TypeError: Expect return type of ScheduleFn to be None, Schedule or "
                         "List[Schedule], but got: "
@@ -72,6 +76,51 @@ class ScheduleFnNode : public SpaceGeneratorNode {
                   "List[Schedule], but got: "
                << obj->GetTypeKey();
     throw;
+  }
+
+  Array<tir::Schedule> GenerateDesignSpace_(const IRModule& mod, const tir::Schedule& sch) {
+    using ScheduleAndUnvisitedBlocks = std::pair<tir::Schedule, Array<tir::BlockRV>>;
+    CHECK(sch_rules.defined()) << "ValueError: `sch_rules` is not set in PostOrderApply";
+
+    std::vector<ScheduleAndUnvisitedBlocks> stack;
+    Array<tir::Schedule> result{sch};
+    Array<tir::BlockRV> all_blocks = BlockCollector::Collect(sch, nullptr);
+
+    for (ScheduleRule sch_rule : sch_rules.value()) {
+      for (const tir::Schedule& sch : result) {
+        stack.emplace_back(sch, all_blocks);
+      }
+      result.clear();
+      while (!stack.empty()) {
+        // get the stack.top()
+        auto [sch, blocks] = stack.back();
+        stack.pop_back();
+        // if all blocks are visited
+        if (blocks.empty()) {
+          result.push_back(sch);
+          continue;
+        }
+        // otherwise, get the last block that is not visited
+        tir::BlockRV block_rv = blocks.back();
+        blocks.pop_back();
+        if (!sch->HasBlock(block_rv)) {
+          stack.emplace_back(sch, blocks);
+          continue;
+        }
+        if (!ScheduleRule::IsApplyCustomRule(sch_rule)) {
+          if (tir::GetAnn<String>(sch->GetSRef(block_rv), "schedule_rule").defined()) {
+            stack.emplace_back(sch, blocks);
+            continue;
+          }
+        }
+
+        Array<tir::Schedule> applied = sch_rule->Apply(sch, /*block=*/block_rv);
+        for (const tir::Schedule& sch : applied) {
+          stack.emplace_back(sch, blocks);
+        }
+      }
+    }
+    return result;
   }
 
   SpaceGenerator Clone() const final {

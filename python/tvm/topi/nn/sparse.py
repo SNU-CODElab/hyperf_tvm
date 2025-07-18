@@ -52,9 +52,11 @@ def sparse_dense_sp_rhs(data, weight_data, weight_indices, weight_indptr):
     """
     assert len(weight_data.shape) in (1, 3)
     if len(weight_data.shape) == 1:
-        func = _sparse_dense_sp_rhs_csrmm
+        # [ywshin] SpMV
+        func = _sparse_dense_sp_rhs_csr
     if len(weight_data.shape) == 3:
-        func = _sparse_dense_sp_rhs_bsrmm
+        # [ywshin] SpMV
+        func = _sparse_dense_sp_rhs_bsr
     return func(data, weight_data, weight_indices, weight_indptr)
 
 
@@ -149,6 +151,29 @@ def _sparse_dense_sp_lhs_csrmm(data_data, data_indices, data_indptr, weight):
     return te.compute(oshape, f, tag="sparse_dense_sp_lhs_csrmm")
 
 
+def _sparse_dense_sp_rhs_csr(data, weight_data, weight_indices, weight_indptr):
+    if len(data.shape) == 1:
+        return _sparse_dense_sp_rhs_csrmv(data, weight_data, weight_indices, weight_indptr)
+    else:
+        return _sparse_dense_sp_rhs_csrmm(data, weight_data, weight_indices, weight_indptr)
+
+
+def _sparse_dense_sp_rhs_csrmv(data, weight_data, weight_indices, weight_indptr):
+    oshape = (get_const_tuple(weight_indptr.shape)[0] - 1,)
+
+    def f(row):
+        row_start = weight_indptr[row]
+        row_end = weight_indptr[row + 1]
+        row_elems = row_end - row_start
+        elem_idx = te.reduce_axis((0, row_elems), name="elem_idx")
+        elem = row_start + elem_idx
+        a_val = weight_data[elem]
+        weight_val = data[weight_indices[elem]]
+        return te.sum(a_val * weight_val, axis=elem_idx)
+
+    return te.compute(oshape, f, tag="sparse_dense_sp_rhs_csrmm")
+
+
 def _sparse_dense_sp_rhs_csrmm(data, weight_data, weight_indices, weight_indptr):
     oshape = (get_const_tuple(data.shape)[0], get_const_tuple(weight_indptr.shape)[0] - 1)
 
@@ -193,6 +218,39 @@ def _sparse_dense_sp_lhs_bsrmm(data_data, data_indices, data_indptr, weight):
         (num_blocks * bs_r, m),
         lambda m, n: bsrmm_block[idxd(m, bs_r), idxm(m, bs_r), n],
         tag="sparse_dense_sp_lhs_bsrmm",
+    )
+
+
+def _sparse_dense_sp_rhs_bsr(data, weight_data, weight_indices, weight_indptr):
+    if len(data.shape) == 1:
+        return _sparse_dense_sp_rhs_bsrmv(data, weight_data, weight_indices, weight_indptr)
+    else:
+        return _sparse_dense_sp_rhs_bsrmm(data, weight_data, weight_indices, weight_indptr)
+
+
+def _sparse_dense_sp_rhs_bsrmv(data, weight_data, weight_indices, weight_indptr):
+    (k,) = get_const_tuple(data.shape)
+    (_, bs_r, bs_c) = get_const_tuple(weight_data.shape)
+    (num_blocks_plus_1,) = get_const_tuple(weight_indptr.shape)
+    num_blocks = num_blocks_plus_1 - 1
+
+    def _compute_block(nb_j, j):
+        row_start = weight_indptr[nb_j]
+        row_end = weight_indptr[nb_j + 1]
+        row_elems = row_end - row_start
+        elem_idx = te.reduce_axis((0, row_elems), name="elem_idx")
+        block_offset = row_start + elem_idx
+        c = te.reduce_axis((0, bs_c), name="c")
+        block_j = weight_indices[block_offset]
+        block_ij_val = weight_data[block_offset][j][c]
+        x_val = data[bs_c * block_j + c]
+        return te.sum(block_ij_val * x_val, axis=[elem_idx, c])
+
+    return te.compute(
+        (num_blocks, bs_r),
+        _compute_block,
+        tag="sparse_dense_sp_rhs_bsrmm_block",
+        attrs={"FLOP": 2 * num_blocks * bs_r * k},
     )
 
 

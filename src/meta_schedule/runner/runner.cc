@@ -21,11 +21,13 @@
 namespace tvm {
 namespace meta_schedule {
 
-RunnerInput::RunnerInput(String artifact_path, String device_type, Array<ArgInfo> args_info) {
+RunnerInput::RunnerInput(String artifact_path, String device_type, Array<ArgInfo> args_info,
+                         Optional<Array<runtime::NDArray>> arg) {
   ObjectPtr<RunnerInputNode> n = make_object<RunnerInputNode>();
   n->artifact_path = artifact_path;
   n->device_type = device_type;
   n->args_info = args_info;
+  n->arg = arg;
   this->data_ = n;
 }
 
@@ -57,9 +59,9 @@ TVM_REGISTER_NODE_TYPE(RunnerFutureNode);
 TVM_REGISTER_OBJECT_TYPE(RunnerNode);
 TVM_REGISTER_NODE_TYPE(PyRunnerNode);
 TVM_REGISTER_GLOBAL("meta_schedule.RunnerInput")
-    .set_body_typed([](String artifact_path, String device_type,
-                       Array<ArgInfo> args_info) -> RunnerInput {
-      return RunnerInput(artifact_path, device_type, args_info);
+    .set_body_typed([](String artifact_path, String device_type, Array<ArgInfo> args_info,
+                       Optional<Array<runtime::NDArray>> arg) -> RunnerInput {
+      return RunnerInput(artifact_path, device_type, args_info, arg);
     });
 TVM_REGISTER_GLOBAL("meta_schedule.RunnerResult")
     .set_body_typed([](Array<FloatImm> run_secs, Optional<String> error_msg) -> RunnerResult {

@@ -431,7 +431,21 @@ std::pair<Array<PrimExpr>, Array<BufferStore>> GetInitValuesAndUpdatesFromReduct
   Array<BufferStore> inits;
   Array<BufferStore> updates;
 
-  // Step 1. Extract the BufferStores serving as block inits.
+  // Step 1. Extract the block updates, in the form of BufferStores.
+  // int n_buffers = inits.size();
+  // [ywshin]: 임시로 하나만 있다고 가정한다. 넘으면 추가 구현을 해야 한다.
+  int n_buffers = 1;
+  std::unordered_map<const BufferNode*, int> buf2index;
+  if (const auto* update = block->body.as<BufferStoreNode>()) {
+    updates.push_back(GetRef<BufferStore>(update));
+    buf2index[update->buffer.get()] = 0;
+  } else {
+    const auto* let = block->body.as<LetStmtNode>();
+    ExtractReductionUpdates(self, block, let, n_buffers, &updates, &buf2index);
+  }
+  ICHECK_EQ(updates.size(), n_buffers);
+
+  // Step 2. Extract the BufferStores serving as block inits.
   if (auto init = block->init.as<BufferStore>()) {
     inits.push_back(init.value());
   } else if (const auto* seq_init = block->init.as<SeqStmtNode>()) {
@@ -448,20 +462,11 @@ std::pair<Array<PrimExpr>, Array<BufferStore>> GetInitValuesAndUpdatesFromReduct
       inits.push_back(init.value());
     }
   } else {
-    ErrorRFactorCrossThreadReductionNotApplicable(self, std::move(block), /*violated_cond=*/1);
+    // [ywshin]: 없으니 그냥 identity를 넣는다.
+    inits.push_back(
+        BufferStore(updates[0]->buffer, make_zero(updates[0]->value.dtype()), updates[0]->indices));
+    // ErrorRFactorCrossThreadReductionNotApplicable(self, std::move(block), /*violated_cond=*/1);
   }
-
-  // Step 2. Extract the block updates, in the form of BufferStores.
-  int n_buffers = inits.size();
-  std::unordered_map<const BufferNode*, int> buf2index;
-  if (const auto* update = block->body.as<BufferStoreNode>()) {
-    updates.push_back(GetRef<BufferStore>(update));
-    buf2index[update->buffer.get()] = 0;
-  } else {
-    const auto* let = block->body.as<LetStmtNode>();
-    ExtractReductionUpdates(self, block, let, n_buffers, &updates, &buf2index);
-  }
-  ICHECK_EQ(updates.size(), n_buffers);
 
   // Step 3. Set the init values according to the buffer order in `updates`, with the help of the
   // mapping `buf2index`.

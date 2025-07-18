@@ -26,7 +26,8 @@ namespace meta_schedule {
 TuneContext::TuneContext(Optional<IRModule> mod, Optional<Target> target,
                          Optional<SpaceGenerator> space_generator,
                          Optional<SearchStrategy> search_strategy, Optional<String> task_name,
-                         int num_threads, TRandState rand_state, PackedFunc logger) {
+                         int num_threads, TRandState rand_state, PackedFunc logger,
+                         Optional<Array<runtime::NDArray>> task_input) {
   CHECK(rand_state == -1 || rand_state >= 0) << "ValueError: Invalid random state: " << rand_state;
   ObjectPtr<TuneContextNode> n = make_object<TuneContextNode>();
   n->mod = mod;
@@ -37,6 +38,7 @@ TuneContext::TuneContext(Optional<IRModule> mod, Optional<Target> target,
   n->num_threads = num_threads;
   n->rand_state = support::LinearCongruentialEngine::NormalizeSeed(rand_state);
   n->logger = logger;
+  n->task_input = task_input;
   data_ = std::move(n);
 }
 
@@ -67,9 +69,10 @@ TVM_REGISTER_GLOBAL("meta_schedule.TuneContext")
     .set_body_typed([](Optional<IRModule> mod, Optional<Target> target,
                        Optional<SpaceGenerator> space_generator,
                        Optional<SearchStrategy> search_strategy, Optional<String> task_name,
-                       int num_threads, TRandState rand_state, PackedFunc logger) -> TuneContext {
+                       int num_threads, TRandState rand_state, PackedFunc logger,
+                       Optional<Array<runtime::NDArray>> task_input) -> TuneContext {
       return TuneContext(mod, target, space_generator, search_strategy, task_name, num_threads,
-                         rand_state, logger);
+                         rand_state, logger, task_input);
     });
 TVM_REGISTER_GLOBAL("meta_schedule._SHash2Hex").set_body_typed(SHash2Hex);
 TVM_REGISTER_GLOBAL("meta_schedule.TuneContextInitialize")

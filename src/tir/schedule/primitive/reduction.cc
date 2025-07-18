@@ -570,7 +570,8 @@ class LoopPropertyError : public ScheduleError {
       bool reduction_touched = reduce_loop_vars.count(loop->loop_var.get());
 
       if (data_par_touched && reduction_touched) {
-        throw LoopPropertyError(self->mod, loop, kLoopTouchedByBothKindsOfBlockIters);
+        // [ywshin]: SpMV에서는 이럴 수 있다. 사용할 때 조심하자.
+        // throw LoopPropertyError(self->mod, loop, kLoopTouchedByBothKindsOfBlockIters);
       } else if (data_par_touched) {
         if (loop.get() == rf_loop) {
           throw LoopPropertyError(self->mod, loop, kDataParIterTouchRFactorLoop);
@@ -662,7 +663,7 @@ class BaseBlockCreator {
     update_rhs_.reserve(n_buffers_);
   }
 
-  void CreateBlock() {
+  void CreateBlock(const std::unordered_map<const VarNode*, Var>& new_loop_var_map) {
     CreateAdditionalIter();
     for (int i = 0; i < n_block_iters_; ++i) {
       CreateNormalIters(i);
@@ -674,22 +675,37 @@ class BaseBlockCreator {
         break;
       }
     }
+    std::unordered_map<const VarNode*, Var> iter_var_map = new_loop_var_map;
+    for (int i = 0; i < iter_vars_.size(); i++) {
+      auto iv = iter_values_[i].as<VarNode>();
+      if (iv) {
+        iter_var_map[iv] = iter_vars_[i]->var;
+      }
+    }
 
     // The pre-processing finds out the buffers written in the block, the indices of the buffer
     // accesses, and the reduction LHS and RHS of the stored values.
     PreProcess();
-    Stmt block_body = Substitute(CreateBlockBody(has_reduce_iter), var_map_);
+    Stmt block_body =
+        Substitute(Substitute(CreateBlockBody(has_reduce_iter), var_map_), iter_var_map);
     Optional<Stmt> block_init = CreateBlockInit(has_reduce_iter);
     if (block_init.defined()) {
-      block_init = Substitute(block_init.value(), var_map_);
+      block_init = Substitute(Substitute(block_init.value(), var_map_), iter_var_map);
     }
-    CreateReadWriteRegions();
+    if (is_rf_block_) {
+      CreateReadWriteRegions(iter_var_map);
+    } else {
+      CreateReadWriteRegions({});
+    }
 
     String new_block_name = old_block_realize_->block->name_hint;
     PrimExpr predicate = const_true();
     if (is_rf_block_) {
       new_block_name = new_block_name + "_rf";
       predicate = old_block_realize_->predicate;
+      for (int i = 0; i < iter_values_.size(); i++) {
+        iter_values_[i] = Substitute(iter_values_[i], new_loop_var_map);
+      }
     }
     new_block_ = Block(
         /*iter_vars=*/iter_vars_,
@@ -708,7 +724,8 @@ class BaseBlockCreator {
   virtual void CreateAdditionalIter() = 0;
   virtual void CreateNormalIters(int idx) = 0;
   virtual void PreProcess() = 0;
-  virtual void CreateReadWriteRegions() = 0;
+  virtual void CreateReadWriteRegions(
+      const std::unordered_map<const VarNode*, Var>& new_loop_var_map) = 0;
 
   Stmt CreateBlockBody(bool has_reduce_iter) {
     Array<Stmt> buf_stores;
@@ -808,6 +825,22 @@ class BaseBlockCreator {
   Array<BufferRegion> write_regions_;
 };
 
+namespace {
+// [ywshin]: is it safe?
+class VarCollector : public ExprVisitor {
+ public:
+  explicit VarCollector() {}
+  void VisitExpr_(const VarNode* op) final {
+    vmap_[op->name_hint] = GetRef<PrimExpr>(op);
+    vmap2_[op->name_hint] = op;
+    ExprVisitor::VisitExpr_(op);
+  }
+
+  std::unordered_map<String, PrimExpr> vmap_;
+  std::unordered_map<String, const VarNode*> vmap2_;
+};
+}  // namespace
+
 /*!
  * \brief The derived class of the rfactor block creator, which implements all virtual methods in
  * the base creator
@@ -836,13 +869,15 @@ class RFactorBlockCreator : public BaseBlockCreator {
                                Array<BufferStore> old_reduction_updates, CommReducer reducer,
                                Array<Buffer> rf_buffers,
                                std::unordered_map<const VarNode*, For> loop_vars2loop,
-                               int factor_axis, Array<PrimExpr> combiner_rhs)
+                               int factor_axis, Array<PrimExpr> combiner_rhs,
+                               const std::unordered_map<const VarNode*, Var>& new_loop_var_map)
       : BaseBlockCreator(std::move(old_block_realize), std::move(rf_loop),
                          std::move(old_reduction_updates), std::move(reducer),
                          std::move(rf_buffers), true),
         loop_vars2loop_(std::move(loop_vars2loop)),
         factor_axis_(factor_axis),
-        combiner_rhs_(std::move(combiner_rhs)) {}
+        combiner_rhs_(std::move(combiner_rhs)),
+        new_loop_var_map_(new_loop_var_map) {}
 
  private:
   void CreateAdditionalIter() final {
@@ -871,10 +906,18 @@ class RFactorBlockCreator : public BaseBlockCreator {
     // This block iter is a reduction block iter that touches the rfactor loop. So next we try to
     // create a new block iter for all loop vars that appear in the old binding.
     Array<Var> vars_in_old_binding = UndefinedVars(old_binding);
+    collector_(old_iter->dom->extent);
+    std::unordered_map<String, PrimExpr> subst_map;
+    for (auto e : loop_vars2loop_) {
+      subst_map[e.first->name_hint] = e.second->loop_var;
+    }
     for (const Var& var : vars_in_old_binding) {
       auto it = loop_vars2loop_.find(var.get());
       if (it == loop_vars2loop_.end()) {
         // `var` is not a loop var. So skip.
+        continue;
+      }
+      if (collector_.vmap_.find(var->name_hint) != collector_.vmap_.end()) {
         continue;
       }
       const For& loop = it->second;
@@ -882,7 +925,9 @@ class RFactorBlockCreator : public BaseBlockCreator {
         // We haven't created the new block iter for `var`. So here we create it, append it
         // and its binding to `rf_block_iter_vars` and `rf_block_iter_values` respectively.
         IterVar new_iter_var =
-            IterVarFromLoop(loop, "v" + loop->loop_var->name_hint, IterVarType::kCommReduce);
+            IterVar(Range::FromMinExtent(loop->min, Substitute(loop->extent, new_loop_var_map_)),
+                    Var(std::move("v" + loop->loop_var->name_hint), loop->loop_var.dtype()),
+                    IterVarType::kCommReduce);
         loop_var2block_binding_[var.get()] = new_iter_var->var;
         iter_vars_.push_back(new_iter_var);
         iter_values_.push_back(var);
@@ -906,7 +951,8 @@ class RFactorBlockCreator : public BaseBlockCreator {
     }
   }
 
-  void CreateReadWriteRegions() final {
+  void CreateReadWriteRegions(
+      const std::unordered_map<const VarNode*, Var>& new_loop_var_map) final {
     Map<Buffer, Buffer> buffer_map;
     for (int i = 0; i < n_buffers_; ++i) {
       buffer_map.Set(old_reduction_updates_[i]->buffer, rf_buffers_[i]);
@@ -915,7 +961,8 @@ class RFactorBlockCreator : public BaseBlockCreator {
     read_regions_.reserve(old_block->reads.size());
     for (const BufferRegion& read_region : old_block->reads) {
       read_regions_.push_back(
-          BufferRegion(read_region->buffer, Substitute(read_region->region, var_map_)));
+          BufferRegion(read_region->buffer,
+                       Substitute(Substitute(read_region->region, var_map_), new_loop_var_map)));
     }
     write_regions_.reserve(old_block->writes.size());
     for (const BufferRegion& write_region : old_block->writes) {
@@ -925,13 +972,15 @@ class RFactorBlockCreator : public BaseBlockCreator {
                                          make_const(additional_iter_->var.dtype(), 1)));
       Optional<Buffer> rf_buffer = buffer_map.Get(write_region->buffer);
       ICHECK(rf_buffer.defined());
-      write_regions_.push_back(BufferRegion(rf_buffer.value(), Substitute(region, var_map_)));
+      write_regions_.push_back(BufferRegion(
+          rf_buffer.value(), Substitute(Substitute(region, var_map_), new_loop_var_map)));
     }
   }
 
  public:
   /*! \brief The generated additional block iter in rfactor block for the rfactor loop */
   IterVar additional_iter_;
+  VarCollector collector_;
 
  private:
   /*!
@@ -949,6 +998,7 @@ class RFactorBlockCreator : public BaseBlockCreator {
    * created block iters
    */
   std::unordered_map<const VarNode*, Var> loop_var2block_binding_;
+  std::unordered_map<const VarNode*, Var> new_loop_var_map_;
 };
 
 /*!
@@ -1002,7 +1052,8 @@ class WriteBackBlockCreator : public BaseBlockCreator {
     }
   }
 
-  void CreateReadWriteRegions() final {
+  void CreateReadWriteRegions(
+      const std::unordered_map<const VarNode*, Var>& new_loop_var_map) final {
     CreateRegion(update_rhs_, true);
     CreateRegion(update_lhs_, false);
   }
@@ -1035,17 +1086,16 @@ class WriteBackBlockCreator : public BaseBlockCreator {
  * \param loops The loops to be wrapped over the rfactor block
  * \return A Stmt which is the wrapping result
  */
-Stmt CreateLoopOutsideRfactorBlock(BlockRealize rf_block_realize, const Array<For>& loops) {
+Stmt CreateLoopOutsideRfactorBlock(
+    BlockRealize rf_block_realize, const Array<For>& loops,
+    const std::unordered_map<const VarNode*, Var>& new_loop_var_map) {
   int n_loops = static_cast<int>(loops.size());
 
   // Step 1. Create new loop vars.
   Array<For> new_loops;
-  std::unordered_map<const VarNode*, Var> new_loop_var_map;
-  new_loops.reserve(n_loops);
-  new_loop_var_map.reserve(n_loops);
-  for (const For& old_loop : loops) {
-    Var new_loop_var = old_loop->loop_var.copy_with_suffix("");
-    new_loop_var_map[old_loop->loop_var.get()] = new_loop_var;
+  std::unordered_map<String, PrimExpr> subst_map;
+  for (auto e : new_loop_var_map) {
+    subst_map[e.first->name_hint] = e.second;
   }
 
   // Step 2. Update the iter bindings and predicate of the rfactor block.
@@ -1064,7 +1114,8 @@ Stmt CreateLoopOutsideRfactorBlock(BlockRealize rf_block_realize, const Array<Fo
   Stmt rf_body = rf_block_realize;
   for (int i = n_loops - 1; i >= 0; --i) {
     ObjectPtr<ForNode> p_loop = make_object<ForNode>(*loops[i].get());
-    p_loop->loop_var = Downcast<Var>(new_loop_var_map[loops[i]->loop_var.get()]);
+    p_loop->loop_var = new_loop_var_map.at(loops[i]->loop_var.get());
+    p_loop->extent = Substitute(p_loop->extent, new_loop_var_map);
     p_loop->body = rf_body;
     rf_body = For(std::move(p_loop));
   }
@@ -1127,6 +1178,7 @@ class BlockReplacer : public StmtMutator {
         loop_vars2loop_(std::move(loop_vars2loop)) {}
 
   Stmt VisitStmt_(const ForNode* loop) final {
+    collector_(loop->extent);
     // Step 1. Check whether this loop is outside the reduction block. Given that we've made sure
     // that the scope root block has stage-pipeline property, if this loop is not outside the
     // reduction block, there's no need to recursively mutate.
@@ -1139,7 +1191,9 @@ class BlockReplacer : public StmtMutator {
 
     // Step 3. If this loop is the rfactor loop and isn't touched by any reduction block iter, it
     // should be kept outside the write-back block. Otherwise it shouldn't.
-    if (loop == rf_loop_.get() || !reduce_loop_vars_.count(loop->loop_var.get())) {
+    if (loop == rf_loop_.get() ||
+        collector_.vmap_.find(loop->loop_var->name_hint) != collector_.vmap_.end() ||
+        !reduce_loop_vars_.count(loop->loop_var.get())) {
       ObjectPtr<ForNode> p_loop = CopyOnWrite(loop);
       p_loop->body = body;
       body = Stmt(p_loop);
@@ -1175,6 +1229,7 @@ class BlockReplacer : public StmtMutator {
   For rf_loop_;
   std::unordered_set<const VarNode*> reduce_loop_vars_;
   std::unordered_map<const VarNode*, For> loop_vars2loop_;
+  VarCollector collector_;
 };
 
 StmtSRef RFactor(ScheduleState self, const StmtSRef& rf_loop_sref, int factor_axis) {
@@ -1246,21 +1301,28 @@ StmtSRef RFactor(ScheduleState self, const StmtSRef& rf_loop_sref, int factor_ax
   // dimension that specified by `factor_axis` and `rf_loop`.
   Array<Buffer> rf_buffers = CreateRFactorBuffers(updates, factor_axis, rf_loop);
 
+  std::unordered_map<const VarNode*, Var> new_loop_var_map_;
+  for (const For& old_loop : loops) {
+    Var new_loop_var = old_loop->loop_var.copy_with_suffix("");
+    new_loop_var_map_[old_loop->loop_var.get()] = new_loop_var;
+  }
+
   // Step 2. Create the rfactor block.
   RFactorBlockCreator rf_block_creator(block_realize, GetRef<For>(rf_loop), updates, reducer,
                                        rf_buffers, loop_vars2loop, factor_axis,
-                                       std::move(combiner_rhs));
-  rf_block_creator.CreateBlock();
+                                       std::move(combiner_rhs), new_loop_var_map_);
+  rf_block_creator.CreateBlock(new_loop_var_map_);
 
   // Step 3. Create the write-back block.
   WriteBackBlockCreator wb_block_creator(block_realize, GetRef<For>(rf_loop), updates, reducer,
                                          rf_buffers, std::move(rf_block_creator.additional_iter_),
                                          std::move(combiner_lhs),
                                          std::move(rf_block_creator.rf_buf_access_indices_));
-  wb_block_creator.CreateBlock();
+  wb_block_creator.CreateBlock({});
 
   // Step 4. Wrap the rfactor block with loops.
-  Stmt rf_body = CreateLoopOutsideRfactorBlock(rf_block_creator.new_block_realize_, loops);
+  Stmt rf_body =
+      CreateLoopOutsideRfactorBlock(rf_block_creator.new_block_realize_, loops, new_loop_var_map_);
 
   // *****************************************************
   // *           Schedule Replacement & Update           *

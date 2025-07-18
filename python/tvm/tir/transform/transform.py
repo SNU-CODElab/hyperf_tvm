@@ -858,6 +858,17 @@ def PlanAndUpdateBufferAllocationLocation():
     return _ffi_api.PlanAndUpdateBufferAllocationLocation()  # type: ignore
 
 
+def InlineLetStmt():
+    """Inline the let statement.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.InlineLetStmt()  # type: ignore
+
+
 def ConvertBlocksToOpaque():
     """Substitute all the block vars with the PrimExprs they are bound to, indicated by
     the corresponding iter_values in BlockRealize, and then convert the blocks into
@@ -965,6 +976,28 @@ def FlattenBuffer():
         The result pass
     """
     return _ffi_api.FlattenBuffer()  # type: ignore
+
+
+def ChangeBufferShape(row: int):
+    """Change buffer shape
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.ChangeBufferShape(row)  # type: ignore
+
+
+def ApplyBinning(rowptr: str, output: str, bin: str):
+    """Apply Binning
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.ApplyBinning(rowptr, output, bin)  # type: ignore
 
 
 def TransformMmaBufferLayout():
@@ -1199,3 +1232,64 @@ def DefaultGPUSchedule():
     ret: tvm.transform.Pass
     """
     return _ffi_api.DefaultGPUSchedule()  # type: ignore
+
+def FoldBuffers():
+    """Fold buffer allocations and deallocations.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.FoldBuffers()  # type: ignore
+
+def PerfectlyNestedLoops():
+    """Transform nested loops to perfectly nested loops.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.EnforcePerfectlyNestedLoops()  # type: ignore
+
+
+def ResolveWAR():
+    """Resolve Write-After-Read (WAR) hazards by inserting a copy.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.ResolveWAR()  # type: ignore
+
+def SimplifyLoopBounds():
+    """Simplify loop bounds by removing redundant conditions.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.SimplifyLoopBounds()  # type: ignore
+
+def AddSpatialAxisToLoopsPass():
+    """Add spatial axis to loops.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.AddSpatialAxisToLoopsPass()  # type: ignore
+
+def ExpandReductionBuffers():
+    """Expand reduction buffers to avoid WAR hazards.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.ExpandReductionBuffers()  # type: ignore

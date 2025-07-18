@@ -484,6 +484,11 @@ TVM_DLL Pass LowerInitBlock();
 TVM_DLL Pass PlanAndUpdateBufferAllocationLocation();
 
 /*!
+ * \brief Inline the let statements in the stmt.
+ */
+TVM_DLL Pass InlineLetStmt();
+
+/*!
  * \brief Substitute all the block vars with the PrimExprs they are bound to, indicated by the
  *        corresponding iter_values in BlockRealize, for opaque blocks by removing all
  *.        the iter_values in BlockRealize and iter_vars in Block.
@@ -572,6 +577,9 @@ TVM_DLL Pass LowerOpaqueBlock();
  * \return The pass.
  */
 TVM_DLL Pass FlattenBuffer();
+
+TVM_DLL Pass ChangeBufferShape(int row);
+TVM_DLL Pass ApplyBinning(String rowptr, String output, String bin);
 
 /*
  * \brief Flatten the multi-dimensional read/write

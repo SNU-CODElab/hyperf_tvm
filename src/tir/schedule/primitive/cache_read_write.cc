@@ -1090,6 +1090,73 @@ class ReindexCacheReadRewriter : public CacheReadRewriter {
 
 class ReindexCacheWriteRewriter;
 
+namespace {
+class IndicesExtractor : public StmtVisitor {
+ public:
+  explicit IndicesExtractor(const Buffer& buffer) : buffer_(buffer) {}
+  void VisitStmt_(const BufferStoreNode* store) final {
+    StmtVisitor::VisitStmt_(store);
+    if (store->buffer.same_as(buffer_)) {
+      indices_ = store->indices;
+    }
+  }
+  Array<PrimExpr> indices_;
+
+ private:
+  Buffer buffer_;
+};
+
+class BufferReplacer : public StmtExprMutator {
+ public:
+  explicit BufferReplacer(const Buffer& src, const Buffer& dst, Map<Block, Block>* block_sref_reuse)
+      : src_(src), dst_(dst), block_sref_reuse_(block_sref_reuse) {}
+
+ private:
+  PrimExpr VisitExpr_(const BufferLoadNode* _load) final {
+    BufferLoad load = Downcast<BufferLoad>(StmtExprMutator::VisitExpr_(_load));
+    if (load->buffer.same_as(src_)) {
+      ObjectPtr<BufferLoadNode> new_load = make_object<BufferLoadNode>(*load.get());
+      new_load->buffer = dst_;
+      return BufferLoad(new_load);
+    }
+    return load;
+  }
+
+  Stmt VisitStmt_(const BlockNode* _block) final {
+    Block old_block = GetRef<Block>(_block);
+    Block block = Downcast<Block>(StmtExprMutator::VisitStmt_(_block));
+    ObjectPtr<BlockNode> new_block = make_object<BlockNode>(*block.get());
+    auto writes = ReplaceBuffer(new_block->writes, src_, dst_);
+    new_block->reads.insert(new_block->reads.end(), writes.begin(), writes.end());
+    block_sref_reuse_->Set(old_block, Block(new_block));
+    return Block(new_block);
+  }
+
+  const Buffer& src_;
+  const Buffer& dst_;
+  Map<Block, Block>* block_sref_reuse_;
+};
+
+static bool IsSimpleInitStmt(const Stmt& stmt) {
+  if (stmt.as<FloatImmNode>() || stmt.as<IntImmNode>()) return true;
+
+  if (stmt.as<EvaluateNode>() && (stmt.as<EvaluateNode>()->value.as<IntImmNode>() ||
+                                  stmt.as<EvaluateNode>()->value.as<FloatImmNode>()))
+    return true;
+
+  if (stmt.as<SeqStmtNode>()) {
+    const SeqStmtNode* array_node = stmt.as<SeqStmtNode>();
+    for (size_t i = 0; i < array_node->size(); ++i) {
+      if (!IsSimpleInitStmt(array_node->seq[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
 /*! \brief Mutator for CacheWrite */
 class CacheWriteRewriter : public StmtExprMutator {
  public:
@@ -1236,6 +1303,21 @@ class CacheWriteRewriter : public StmtExprMutator {
         n->writes = std::move(writes);
         n->reads = std::move(reads);
         n->match_buffers = std::move(match_buffers);
+
+        // Case 1: n->init이 비어있거나 상수일 때,
+        if (!n->init.defined() || IsSimpleInitStmt(n->init.value())) {
+          IndicesExtractor extractor(info_->read_buffer);
+          extractor(n->body);
+          n->init =
+              BufferStore(info_->read_buffer, BufferLoad(info_->write_buffer, extractor.indices_),
+                          extractor.indices_);
+        } else {
+          // Case 2: TODO: n->init이 비어있지 않을 때, 버퍼를 대체해야 한다.
+          BufferReplacer replacer(info_->read_buffer, info_->write_buffer, &info_->block_reuse);
+          auto b = replacer(Block(n)).as<BlockNode>();
+          n->init = b->init;
+          n->reads = b->reads;
+        }
         stmt = Block(n);
       }
     }

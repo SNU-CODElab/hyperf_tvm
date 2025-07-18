@@ -242,7 +242,11 @@ void AdjustParallelVectorize(const Schedule& sch, const BlockRV& block_rv,
       } else {
         // contiguous memory access
         const auto* prev_loop = loop_srefs[prev_used_iter]->StmtAs<ForNode>();
-        int64_t prev_used_iter_extent = prev_loop->extent.as<IntImmNode>()->value;
+        // [ywshin]: dynamic loop extent는 1로 간주한다.
+        int64_t prev_used_iter_extent = 1;
+        if (prev_loop->extent.as<IntImmNode>() != nullptr) {
+          prev_used_iter_extent = prev_loop->extent.as<IntImmNode>()->value;
+        }
         if (strides[i] == strides[prev_used_iter] * prev_used_iter_extent) {
           fusible++;
           prev_used_iter = i;
@@ -270,13 +274,16 @@ void AdjustParallelVectorize(const Schedule& sch, const BlockRV& block_rv,
       }
       // Check if the loop extent is valid
       const int64_t* extent = GetLoopIntExtent(loop_sref);
+      int ext = *extent;
       if (extent == nullptr) {
+        // [ywshin]: dynamic loop extent는 1로 간주한다.
+        ext = 1;
         break;
       }
       // Then we can fuse it in
       ++num_fusible;
       // Check if we need to break
-      prod_extent *= *extent;
+      prod_extent *= ext;
       if (prod_extent > max_extent || !IsSingleStmt(loop->body)) {
         break;
       }

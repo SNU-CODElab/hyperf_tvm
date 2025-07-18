@@ -67,7 +67,8 @@ tir::PrimFunc FewShotTunePrimFunc(const tir::PrimFunc& prim_func, const Target& 
       /*task_name=*/NullOpt,
       /*num_threads=*/num_threads,  // use all available local threads
       /*rand_state=*/-1,            // -1 means use random seed
-      /*logger=*/nullptr);
+      /*logger=*/nullptr,
+      /*task_input=*/NullOpt);
   task->Initialize();
   task->search_strategy.value()->PreTuning(
       /*max_trials=*/valid_count, /*num_trials_per_iter=*/valid_count,
@@ -106,7 +107,8 @@ tir::PrimFunc FewShotTunePrimFunc(const tir::PrimFunc& prim_func, const Target& 
           runner_inputs.push_back(meta_schedule::RunnerInput(
               /*artifact_path=*/builder_result->artifact_path.value(),
               /*device_type=*/target->kind->name,
-              /*args_info=*/candidates.value()[idx]->args_info));
+              /*args_info=*/candidates.value()[idx]->args_info,
+              /*arg=*/NullOpt));
         }
         idx++;
       }

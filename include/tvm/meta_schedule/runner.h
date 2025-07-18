@@ -40,11 +40,13 @@ class RunnerInputNode : public runtime::Object {
   String device_type;
   /*! \brief The argument information. */
   Array<ArgInfo> args_info;
+  Optional<Array<runtime::NDArray>> arg;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("artifact_path", &artifact_path);
     v->Visit("device_type", &device_type);
     v->Visit("args_info", &args_info);
+    v->Visit("arg", &arg);
   }
 
   static constexpr const char* _type_key = "meta_schedule.RunnerInput";
@@ -63,7 +65,8 @@ class RunnerInput : public runtime::ObjectRef {
    * \param device_type The type of device.
    * \param args_info The argument information.
    */
-  TVM_DLL explicit RunnerInput(String artifact_path, String device_type, Array<ArgInfo> args_info);
+  TVM_DLL explicit RunnerInput(String artifact_path, String device_type, Array<ArgInfo> args_info,
+                               Optional<Array<runtime::NDArray>> arg);
   TVM_DEFINE_NOTNULLABLE_OBJECT_REF_METHODS(RunnerInput, runtime::ObjectRef, RunnerInputNode);
 };
 

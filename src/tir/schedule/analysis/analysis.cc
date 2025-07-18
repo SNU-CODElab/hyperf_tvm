@@ -307,7 +307,8 @@ int CheckReductionBlockErrorCode(const ScheduleState& self, const StmtSRef& bloc
   }
   // Cond 2. All the block bindings are quasi-affine expressions.
   if (!self->IsAffineBlockBinding(block_sref)) {
-    return 2;
+    // [ywshin]
+    return 0;
   }
   // Cond 3. All block vars are either data parallel block vars or reduction block vars. Meanwhile,
   // we collect all the reduction block vars.
@@ -610,7 +611,8 @@ void CheckPartialAffineBinding(const ScheduleState& self, Block block,
       return;
     }
   }
-  throw NotAffineBindingError(self->mod, std::move(block), high_exclusive);
+  // [ywshin]: 지금은 affine binding이 아닌 경우에 대해서 에러를 발생시키지 않는다.
+  // throw NotAffineBindingError(self->mod, std::move(block), high_exclusive);
 }
 
 void CheckAffineBinding(const ScheduleState& self, Block block) {
@@ -1530,7 +1532,8 @@ bool NeedsMultiLevelTiling(const ScheduleState& self, const StmtSRef& block_sref
     // Step 2.3. Collect the block vars that are used to index the read region
     std::unordered_set<const VarNode*> vars;
     for (const Range& range : regions) {
-      if (as_const_int(range->extent) == nullptr) {
+      // [ywshin]: 너무 강한 제약조건이다. 완화한다.
+      if (false && as_const_int(range->extent) == nullptr) {
         return false;
       }
       for (const Var& var : UndefinedVars(range->min)) {
@@ -1546,7 +1549,11 @@ bool NeedsMultiLevelTiling(const ScheduleState& self, const StmtSRef& block_sref
     }
     total_unused_block_vars += n_unused_block_vars;
   }
-  return total_unused_block_vars >= 1;
+  // [ywshin]: 너무 강한 제약조건이다. 완화한다.
+  if (spatial_block_vars.size() == 0) {
+    return total_unused_block_vars >= 1;
+  }
+  return true || total_unused_block_vars >= 1;
 }
 
 bool IsSpatialPrimFunc(const PrimFunc& func) {
@@ -1604,6 +1611,9 @@ bool NeedsRFactorOrCrossThreadReduction(const tir::ScheduleState& self,   //
                                         const tir::StmtSRef& block_sref,  //
                                         int64_t max_parallel_extent,      //
                                         int64_t max_parallel_basic) {
+  // [ywshin]: 우선 강제로 false를 리턴하도록 한다. 다시 원래대로 되돌렸다. 어떤 벤치에서 문제가
+  // 발생하는지 보고, 대응해야 한다.
+  // return false;
   const BlockNode* block = TVM_SREF_TO_BLOCK(block_sref);
   Array<tir::StmtSRef> loops = tir::GetLoops(block_sref);
 

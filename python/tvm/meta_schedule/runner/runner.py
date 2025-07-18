@@ -15,13 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 """Runners"""
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Union, Dict
 
 # isort: off
 from typing_extensions import Literal
 
 # isort: on
 
+import tvm
 from tvm._ffi import register_object
 from tvm.runtime import Object
 
@@ -46,12 +47,14 @@ class RunnerInput(Object):
     artifact_path: str
     device_type: str
     args_info: List[ArgInfo]
+    arg: Optional[List[tvm.nd.NDArray]]
 
     def __init__(
         self,
         artifact_path: str,
         device_type: str,
         args_info: List[ArgInfo],
+        arg: Optional[List[tvm.nd.NDArray]],
     ) -> None:
         """Constructor
 
@@ -69,6 +72,7 @@ class RunnerInput(Object):
             artifact_path,
             device_type,
             args_info,
+            arg,
         )
 
 

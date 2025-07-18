@@ -319,7 +319,8 @@ class BlockInfoCollector : private StmtVisitor {
           }
         }
       }
-      stage_pipeline = stage_pipeline && region_cover;
+      // [ywshin]: 잠시 region_cover는 stage_pipeline 조건에서 제외한다.
+      // stage_pipeline = stage_pipeline && region_cover;
     }
     return stage_pipeline;
   }

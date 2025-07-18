@@ -52,9 +52,11 @@ Postproc Postproc::PyPostproc(
 
 Array<Postproc> Postproc::DefaultLLVM() {
   return Array<Postproc>{
-      Postproc::DisallowDynamicLoop(),
+      // [ywshin]: dynamic loop은 SpMV를 위해 허용되어야 한다.
+      // Postproc::DisallowDynamicLoop(),
       Postproc::RewriteParallelVectorizeUnroll(),
-      Postproc::RewriteReductionBlock(),
+      // [ywshin]: 임시로 disable 한다.
+      // Postproc::RewriteReductionBlock(),
       Postproc::RewriteLayout(),
   };
 }

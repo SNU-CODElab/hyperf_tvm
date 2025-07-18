@@ -203,6 +203,7 @@ std::vector<State> MultiLevelTilingNode::TileLoopNest(State state) const {
   state->tile_factors.resize(tiles.size());
   std::vector<Array<tir::ExprRV>> tile_factors;
   tile_factors.resize(tiles.size());
+  int inferred_index = -1;
   for (int i = 0, n = loops.size(); i < n; ++i) {
     LoopRV loop = loops[i];
     const std::vector<int>* idx = nullptr;
@@ -222,6 +223,11 @@ std::vector<State> MultiLevelTilingNode::TileLoopNest(State state) const {
       continue;
     }
 
+    // [ywshin]: dynamic loop라면 첫 번째 요소가 -1이다.
+    if (tir::GetLoopIntExtent(sch->Get(loop).get()) == nullptr) {
+      inferred_index = idx->at(0);
+    }
+
     const int n_tiles = idx->size();
 
     if (n_tiles == 1) {
@@ -235,6 +241,12 @@ std::vector<State> MultiLevelTilingNode::TileLoopNest(State state) const {
         tile_factors[idx->at(j)].push_back(factors[j]);
       }
     }
+  }
+  // [ywshin]: 다른 loop variable에 의존하는 loop extent는 가장 innermost로 보내야 한다.
+  if (inferred_index != -1) {
+    std::rotate(tile_factors.begin() + inferred_index, tile_factors.begin() + inferred_index + 1,
+                tile_factors.end());
+    std::rotate(tiles.begin() + inferred_index, tiles.begin() + inferred_index + 1, tiles.end());
   }
   state->tile_factors = std::move(tile_factors);
   // Step 3. Reorder to organize the tiles

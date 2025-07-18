@@ -487,7 +487,17 @@ Array<LoopRV> ConcreteScheduleNode::Split(const LoopRV& loop_rv,
     } else {
       PrimExpr factor = this->Get(factor_rvs[i].value());
       if (is_const_int(factor) && !is_positive_const(factor)) {
-        throw NonPositiveFactorError(state_->mod, factor.as<IntImmNode>()->value, i);
+        // [ywshin]: dynamic loop일 때 sampling을 하면 마지막 extent가 -1이 나올 수 있다.
+        if (i == 0) {
+          factors.push_back(Integer(-1));
+          if (infer_index != -1) {
+            throw NotSingleInferFactorError(state_->mod);
+          }
+          infer_index = i;
+          continue;
+        } else {
+          throw NonPositiveFactorError(state_->mod, factor.as<IntImmNode>()->value, i);
+        }
       }
       if (factor.dtype().bits() > loop->extent.dtype().bits()) {
         factor = cast(loop->extent.dtype(), factor);

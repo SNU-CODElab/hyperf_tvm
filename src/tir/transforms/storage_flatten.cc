@@ -1894,6 +1894,7 @@ PrimFunc StorageFlatten(PrimFunc func, int cache_line_size, bool create_bound_at
   // per-function attribute, we can't just check it once for the
   // entire module and apply the Sequential transform.
   Optional<Bool> from_legacy_te_schedule = func->GetAttr("from_legacy_te_schedule", Bool(false));
+  // [ywshin]: TODO: prefetch
   if (from_legacy_te_schedule.value()) {
     auto seq = transform::Sequential(
         {

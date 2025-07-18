@@ -63,6 +63,7 @@ class TuneContextNode : public runtime::Object {
   TRandState rand_state;
   /*! \brief The tuning task's logging function. t*/
   PackedFunc logger;
+  Optional<Array<runtime::NDArray>> task_input;
 
   void VisitAttrs(tvm::AttrVisitor* v) {
     v->Visit("mod", &mod);
@@ -72,6 +73,7 @@ class TuneContextNode : public runtime::Object {
     v->Visit("task_name", &task_name);
     v->Visit("num_threads", &num_threads);
     v->Visit("rand_state", &rand_state);
+    v->Visit("task_input", &task_input);
     // `logger` is not visited
   }
   /*!
@@ -109,7 +111,8 @@ class TuneContext : public runtime::ObjectRef {
   TVM_DLL explicit TuneContext(Optional<IRModule> mod, Optional<Target> target,
                                Optional<SpaceGenerator> space_generator,
                                Optional<SearchStrategy> search_strategy, Optional<String> task_name,
-                               int num_threads, TRandState rand_state, PackedFunc logger);
+                               int num_threads, TRandState rand_state, PackedFunc logger,
+                               Optional<Array<runtime::NDArray>> task_input);
   TVM_DEFINE_MUTABLE_NOTNULLABLE_OBJECT_REF_METHODS(TuneContext, ObjectRef, TuneContextNode);
 };
 
